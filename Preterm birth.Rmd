@@ -1,0 +1,369 @@
+---
+title: "Preterm Birth"
+subtitle: "Using Random Forest to Predict Preterm births among women in rural settings of Uganda."
+author: "Mercy Consolate Akello"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    theme: cerulean
+    toc: yes
+    highlight: breezedark
+    toc_depth: 2
+---
+
+# Load data
+```{r message=FALSE}
+library(readr)
+Pretem <- read_csv("C:/Users/Akello_Mercy/Desktop/wwcode hackathon/preterm.csv")
+Preterm=Pretem
+```
+
+# load required packages
+```{r message=FALSE}
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(forcats)
+library(stringr)
+```
+
+## Inspect data
+```{r}
+glimpse(Preterm)
+```
+
+## inspect a few of the observations
+```{r}
+tail(Preterm)
+```
+
+# Clean the data
+## create new categorical variable from binary columns
+```{r}
+Preterm$anc.attendant=as.factor(ifelse(Preterm$Q409__1==1,"Doctor",
+                ifelse(Preterm$Q409__2==1,"Nurse",
+                ifelse(Preterm$Q409__3==1,"Midwife",
+                ifelse(Preterm$Q409__4==1,"Other",
+                ifelse(Preterm$Q409__5==1,"Other",
+                ifelse(Preterm$Q409__99==1,"Other",NA)))))))
+
+Preterm$place.of.anc=as.factor(ifelse(Preterm$"Q410__1"==1,"Other",
+                ifelse(Preterm$"Q410__2"==1,"Other",
+                ifelse(Preterm$"Q410__3"==1,"Government Hospital",
+                ifelse(Preterm$"Q410__4"==1,"Government Health Center",
+                ifelse(Preterm$"Q410__5"==1,"Government Health Center",
+                ifelse(Preterm$"Q410__6"==1,"Other Government Health Facility",
+                ifelse(Preterm$"Q410__7"==1,"Private Hospital",
+                ifelse(Preterm$"Q410__8"==1,"Other",
+                ifelse(Preterm$"Q410__9"==1,"Other",
+                ifelse(Preterm$"Q410__10"==1,"Other", NA)))))))))))
+```
+
+## Look at ethinicity
+```{r}
+table(Preterm$ethinicity)
+```
+
+## recategorize values for ethinicity
+```{r}
+Preterm=Preterm%>%
+  mutate(ethinicity=recode(ethinicity,
+                           "Acholis"="Other",
+                           "Bagisu"="Other",
+                           "Bakiga"="Other",
+                           "Banyankole"="Other",
+                           "Itesot"="Other",
+                           "Jopadhola"="Other",
+                           "Karamajong"="Other",
+                           "Langi"="Other",
+                           "Lugubar"="Other"))
+```
+
+## inspect religion
+```{r}
+table(Preterm$religion)
+```
+**Other has only one observation, combine it with SDA and call it Other.**
+
+## recategorize values for religion
+```{r}
+Preterm=Preterm%>%
+  mutate(religion=recode(religion,
+                           "SDA"="Other"))
+```
+
+## remove columns that won't be used in analysis
+```{r}
+Preterm=Preterm%>%
+  select(-c(Q409__1:Q409__99, Q410__1:Q410__10))
+```
+
+
+# check for missing values
+```{r}
+colSums(is.na(Preterm))
+```
+
+## replace NA values in education
+```{r}
+Preterm=Preterm%>%
+  replace_na(list(education="None"))
+```
+
+## confirm that there are no more NA values
+```{r}
+anyNA(Preterm$education)
+```
+
+# Perform variable casting
+```{r}
+Preterm$preterm=as.factor(Preterm$preterm)
+Preterm$attended.school=as.factor(Preterm$attended.school)
+Preterm$education=as.factor(Preterm$education)
+Preterm$religion=as.factor(Preterm$religion)
+Preterm$ethinicity=as.factor(Preterm$ethinicity)
+Preterm$attended.anc=as.factor(Preterm$attended.anc)
+Preterm$place.of.anc=as.factor(Preterm$place.of.anc)
+Preterm$anc.attendant=as.factor(Preterm$anc.attendant)
+```
+
+## change all values in education to sentence case.
+```{r}
+Preterm$education=str_to_sentence(Preterm$education)
+```
+
+# Visualize data
+```{r}
+ggplot(Preterm,aes(preterm))+
+  geom_bar(fill="#32C7A9")+
+  labs(title = 'Preterm births')+
+  theme_classic()
+```
+
+## education
+```{r}
+Preterm%>%
+  group_by(education)%>%
+  summarize(count=n())%>%
+ggplot(aes(x = reorder(education,count), y = count))+
+  geom_bar(stat="identity", fill="#32C7A9")+
+  labs(x='education', title = 'Education level of the mothers')
+```
+
+## place.of.anc
+```{r}
+Preterm%>%
+  group_by(place.of.anc)%>%
+  summarize(count=n())%>%
+ggplot(aes(x = reorder(place.of.anc,count), y = count))+
+  geom_bar(stat="identity", fill="#32C7A9")+
+  coord_flip()+
+  labs(x='Place of ANC', title = 'The place of ANC visits for the mothers')
+```
+**Most mothers attended ANC at Government Health Center or Government Hospital.**
+
+
+## anc.attendant
+```{r}
+Preterm%>%
+  group_by(anc.attendant)%>%
+  summarize(count=n())%>%
+ggplot(aes(x = reorder(anc.attendant,count), y = count))+
+  geom_bar(stat="identity", fill="#32C7A9")+
+  coord_flip()+
+  labs(x='ANC Attendant', title = 'The ANC Attendant of the the mother')
+```
+**Majority of the mothers were attended to by a Nurse.**
+
+# Numeric data
+## mother's age
+```{r}
+Preterm%>%
+  ggplot(aes(mothers.age))+
+  geom_histogram(aes(y=after_stat(density)),bins=15, fill="#D60093")+
+  geom_density(lwd=1, color="#E9BF35")+
+  labs(x='mothers.age', title = 'The mothers age distribution')
+```
+**The age distribution is right skewed with most mothers between the age of 25 and 35 years.**
+
+## number.of.anc.visits
+```{r message=FALSE}
+Preterm%>%
+  ggplot(aes(number.of.anc.visits))+
+  geom_histogram(fill="#D60093")+
+  labs(x='Number of ANC visits', title = 'Distribution of the number of ANC visits.')
+```
+**There are some outliers in the data.**
+
+**Find out how many observations are outliers**
+```{r}
+table(Preterm$number.of.anc.visits)
+```
+
+**Find out if they are preterm or not**
+```{r}
+table(Preterm$number.of.anc.visits,Preterm$preterm)
+```
+
+**The values are all not preterm, so we can just drop them.**
+```{r}
+Preterm=Preterm%>%
+  filter(!number.of.anc.visits>10)
+```
+
+**Plot number.of.anc.visits without the outlier**
+```{r}
+Preterm%>%
+  ggplot(aes(number.of.anc.visits))+
+  geom_histogram(stat="count", fill="#D60093")+
+  labs(x='Number of ANC visits', title = 'Distribution of the number of ANC visits.')
+```
+
+**Replace 10 with 9**
+```{r}
+Preterm$number.of.anc.visits=ifelse(Preterm$number.of.anc.visits==10,9,Preterm$number.of.anc.visits)
+```
+
+**Plot number.of.anc.visits again**
+```{r warning=FALSE}
+Preterm%>%
+  ggplot(aes(number.of.anc.visits))+
+  geom_histogram(stat="count", fill="#D60093")+
+  labs(x='Number of ANC visits', title = 'Distribution of the number of ANC visits.')
+```
+**The distribution of the number of ANC visits is right skewed and majority of mothers attended atleast 4 ANC visits.**
+
+## mothers.age VS number.of.anc.visits
+```{r}
+Preterm%>%
+  ggplot(aes(mothers.age,number.of.anc.visits))+
+  geom_point(color="#E9BF35", size=2)+
+  labs(x="Mother's Age", y='Number of ANC visits', title = 'Scatter Plot of Mothers Age and Number of ANC visits.')+
+  theme_classic()
+```
+**There appears to be no linear relationship between mother's age and the number of anc visits she makes.**
+
+#  compare mother's age with other categorical variables
+## education
+```{r}
+Preterm%>%
+  ggplot(aes(reorder(education,mothers.age),mothers.age))+
+  geom_boxplot(fill="#E9BF35")+
+  labs(x="Education", y='Mothers Age', title = 'Boxplot of Mothers Age and Education.')+
+  theme_classic()
+```
+
+## ethinicity
+```{r}
+Preterm%>%
+  ggplot(aes(reorder(ethinicity,mothers.age,median),mothers.age))+
+  geom_boxplot(fill="#E9BF35", outlier.color= "#32C7A9",
+               outlier.size =2 )+
+   labs(x="Ethinicity", y='Mothers Age', title = 'Boxplot of Mothers Age and Ethinicity')+
+  theme_classic()
+```
+
+## anc.attendant
+```{r}
+Preterm%>%
+  ggplot(aes(reorder(anc.attendant,mothers.age,median),mothers.age))+
+  geom_boxplot(fill="#E9BF35")+
+   labs(x="ANC Attendant", y='Mothers Age', title = 'Boxplot of Mothers Age and ANC Attendant')+
+  theme_classic()
+```
+
+## place.of.anc
+```{r}
+Preterm%>%
+  ggplot(aes(reorder(place.of.anc,mothers.age,median),mothers.age))+
+  geom_boxplot(fill="#E9BF35")+
+   labs(x="Place of ANC", y='Mothers Age', title = 'Boxplot of Mothers Age and Place of ANC')+
+  theme_classic()
+```
+
+## preterm
+```{r}
+Preterm%>%
+  ggplot(aes(reorder(preterm,-mothers.age,median),mothers.age))+
+  geom_boxplot(fill="#E9BF35")+
+   labs(x="Preterm", y='Mothers Age', title = 'Boxplot of Mothers Age and Preterm')+
+  theme_classic()
+```
+**The median age of mothers who had preterm delivery(1) was lower than that of mothers who did not have preterm delivery(0).**
+
+# Build a machine learning model
+```{r message=FALSE}
+require(randomForest)
+require(caret)
+```
+
+## Divide into Train and Test datasets
+```{r}
+set.seed(1234)
+pre <- sample(2, nrow(Preterm),replace = TRUE,prob = c(0.7,0.3))
+Train <- Preterm[pre==1,]
+Test <- Preterm[pre==2,]
+```
+
+## Random Forest
+```{r}
+rf=randomForest(preterm~mothers.age+education+religion+ethinicity+number.of.anc.visits+anc.attendant+place.of.anc, Preterm)
+```
+
+## predict the preterm using the Test dataset
+```{r}
+preterm.predicted=predict(rf,Test)
+```
+
+## View Predicted values
+```{r}
+preterm.predicted
+```
+
+## model performance
+```{r}
+Trf <- table(PredictedValue=preterm.predicted, ActualValue=Test$preterm)
+print(confusionMatrix(Trf))
+```
+
+# Model improvement
+**I will now adjust the parameters of the model and rerun the model and see if there is any improvement.**
+```{r}
+rf2=randomForest(preterm~mothers.age+education+religion+ethinicity+number.of.anc.visits+anc.attendant+place.of.anc, Preterm, ntree=500, mtry=3, nodesize=0.01*nrow(Test))
+```
+
+## predict the preterm using the Test dataset
+```{r}
+preterm.predicted2=predict(rf2,Test)
+```
+
+## view Predicted values
+```{r}
+preterm.predicted2
+```
+
+## model performance
+```{r}
+Trf2 <- table(PredictedValue=preterm.predicted2,
+              ActualValue=Test$preterm)
+print(confusionMatrix(Trf2))
+```
+**There is a slight improvement in the model performance.**
+
+# variable importance
+```{r}
+varImpPlot(rf2, main = "Variable Importance Plot", col="#32C7A9")
+```
+**The mother's age was the most important variable in predicting preterm birth;this was followed by religion, education, number.of.anc.visits and ethinicity as the top five predictors of preterm birth.**
+
+**place.of.anc and anc.attendant were least important predictors of preterm delivery.**
+
+# Conclusion
+**The Random forest model here gives us the mother's age as a key determinant of preterm birth.**
+
+# Recommendation
+**Based on this finding; I suggest that policy makers design programs that are focused on addressing the age specific needs of the mothers in rural communities.**
+
+
